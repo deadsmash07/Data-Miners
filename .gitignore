@@ -1,0 +1,29 @@
+# Ignore output directories
+output2/
+output1/
+Binaries/
+data1/
+data2/
+internet/
+# Ignore specific files
+q2/fsg_data.fp
+q2/fsg_data.txt
+q2/gaston_data.txt
+q2/gsapn_data.txt
+q2/gsapn_data.txt.fp
+q3/gSpan6.tar.gz
+
+# Ignore entire directories
+q3/dm/
+q3/q3_datasets/
+
+# Ignore all files in q2/ except .sh and .py
+q2/*
+!q2/*.sh
+!q2/*.py
+
+# Ignore all files in q3/ except .sh and .py and .png
+q3/*
+!q3/*.sh
+!q3/*.py
+!q3/*.png

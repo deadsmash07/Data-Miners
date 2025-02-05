@@ -1,18 +1,12 @@
 #!/usr/bin/env bash
+# env.sh : Minimal environment setup for Q3
 
-# env.sh
-# Example environment setup script for HPC or local machine.
-# We assume Python 3.10 is available. Adapt as needed.
+# (Adapt for your HPC if needed, e.g., module load python/3.10)
+# or create and activate a virtual environment:
+# python3 -m venv dm
+# source dm/bin/activate
 
-# For HPC, you might do:
-# module load python/3.10
+# Install required Python packages
+pip install --user numpy networkx scikit-learn
 
-# Otherwise, for a local conda environment:conda install networkx scikit-learn numpy scipy
-pip install gspan_miner
-
-# If conda-forge has gspan_miner, you can do:
-# conda install -c conda-forge gspan_miner networkx scikit-learn numpy scipy
-# Otherwise, use pip:
-pip install --user gspan_miner networkx scikit-learn numpy scipy
-
-echo "Environment setup complete."
+echo "Environment set up. Python 3.10 and necessary libraries installed (numpy, networkx, scikit-learn)."

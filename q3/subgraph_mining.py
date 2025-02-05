@@ -1,359 +1,339 @@
 #!/usr/bin/env python3
-# subgraph_mining.py
-
 import argparse
+import subprocess
+import networkx as nx
 import numpy as np
 import os
-import networkx as nx
 from math import floor
-from sklearn.model_selection import train_test_split
 from scipy.stats import chi2_contingency
 
-from gspan_miner.config import parser as gspan_parser
-from gspan_miner.gspan import gSpan
-from gspan_miner.graph import Graph as GSpanGraph
-
 ##############################################################################
-# 1. Loading TUDataset-Style Graphs
+# 1. Loading the assignment’s graph format
 ##############################################################################
-def load_graphs_tudataset(graph_path, label_path):
+def load_graphs(path_graphs):
     """
-    Loads graphs in TUDataset format from graph_path, labels from label_path.
-    Returns a list of networkx Graph objects and a list/array of labels.
+    Loads a set of undirected graphs from the format:
+      # (new graph)
+      v 0 <label>
+      v 1 <label>
+      ...
+      e 0 1 <label>
+      # (new graph)
+      ...
+    Returns: a list of networkx.Graph objects (undirected).
     """
     graphs = []
-    current_graph = None
-    
-    with open(graph_path, 'r') as f:
+    G = None
+    with open(path_graphs, 'r') as f:
         for line in f:
             line = line.strip()
             if not line:
                 continue
             if line.startswith('#'):
-                if current_graph is not None:
-                    graphs.append(current_graph)
-                current_graph = nx.Graph()
+                # start a new graph
+                if G is not None:
+                    graphs.append(G)
+                G = nx.Graph()  # new undirected graph
             else:
                 parts = line.split()
                 if parts[0] == 'v':
                     # v <node_id> <node_label>
-                    _, node_id, node_label = parts
-                    current_graph.add_node(int(node_id), label=int(node_label))
+                    node_id = int(parts[1])
+                    node_label = parts[2]
+                    G.add_node(node_id, label=node_label)
                 elif parts[0] == 'e':
-                    # e <u> <v> <edge_label>
-                    _, u, v, e_label = parts
-                    current_graph.add_edge(int(u), int(v), label=int(e_label))
-        # add last graph
-        if current_graph is not None:
-            graphs.append(current_graph)
-    
-    labels = np.loadtxt(label_path, dtype=int)
-    return graphs, labels
+                    # e <src> <dst> <edge_label>
+                    src = int(parts[1])
+                    dst = int(parts[2])
+                    edge_label = parts[3]
+                    G.add_edge(src, dst, label=edge_label)
+
+    # add the last graph if still in memory
+    if G is not None:
+        graphs.append(G)
+    return graphs
+
+def load_labels(path_labels):
+    """
+    Loads labels from a file: one label per line (0 or 1).
+    Returns a 1D numpy array of shape (num_graphs,).
+    """
+    with open(path_labels, 'r') as f:
+        labels = [int(line.strip()) for line in f if line.strip()]
+    return np.array(labels, dtype=int)
 
 ##############################################################################
-# 2. Converting NetworkX graphs to gSpan_miner Graph format
+# 2. Run external gSpan binary
 ##############################################################################
-def nx_to_gspan_graph(nx_graph, gid):
+def run_subgraph_miner_gspan(miner_binary, dataset_file, output_file, min_support):
     """
-    Convert a single networkx Graph into gSpan's internal Graph format.
-    GSpanGraph expects:
-      - an ID (gid)
-      - a list of vertices with numeric labels
-      - a list of edges (u, v, numeric label, direction=0 for undirected)
-    We rely on the node/edge .label attributes from TUDataset for numeric labels.
+    Calls the gSpan binary to mine frequent subgraphs:
+      gSpan -f <dataset_file> -s <support_percent> -o ...
+    We redirect stdout to output_file.
     """
-    # gSpan's Graph structure
-    #   * Graph.gid
-    #   * Graph.vertices = {vid: label}
-    #   * Graph.edges = {vid: {vid2: elabel}}
-    from gspan_miner.graph import Graph as GSpanGraph
-    
-    gspan_graph = GSpanGraph(gid)
-    
-    # Add vertices
-    for node in sorted(nx_graph.nodes()):
-        nlabel = nx_graph.nodes[node]['label']
-        gspan_graph.add_vertex(node, nlabel)
-    
-    # Add edges
-    for u, v, data in nx_graph.edges(data=True):
-        elabel = data['label']
-        # undirected => we add edges (u,v) and (v,u)
-        gspan_graph.add_edge(u, v, elabel)
-        gspan_graph.add_edge(v, u, elabel)
-    
-    gspan_graph.build_edge_size()  # finalize
-    return gspan_graph
+    # Convert fractional support to a percentage (e.g., 0.05 => 5.0).
+    support_percent = min_support * 100.0
 
-def convert_nx_list_to_gspan(nx_graphs):
-    """
-    Convert a list of networkx graphs to a format suitable for gSpan.
-    Returns a list of GSpanGraph objects.
-    """
-    gspan_graphs = []
-    for i, Gnx in enumerate(nx_graphs):
-        gspan_graphs.append(nx_to_gspan_graph(Gnx, i))
-    return gspan_graphs
+    cmd = [
+        miner_binary,
+        '-f', dataset_file,
+        '-s', str(support_percent),
+        '-o',  # output discovered subgraphs to stdout
+        '-i'   # include the graph IDs that contain each pattern in the output
+    ]
+    print("[INFO] Running gSpan command:", " ".join(cmd))
+
+    # We redirect stdout to output_file so we can parse it later
+    with open(output_file, 'w') as outf:
+        subprocess.run(cmd, stdout=outf, check=True)
+
+    print(f"[INFO] gSpan completed. Results in {output_file}")
 
 ##############################################################################
-# 3. Using gSpan to Mine Frequent Subgraphs
+# 3. Parse gSpan output to build subgraph membership
 ##############################################################################
-class GSCallback(object):
+def parse_mined_subgraphs_gspan(output_file, ngraphs):
     """
-    A callback class for gSpan that collects the discovered subgraphs.
-    Each 'subgraph' is stored with info about which graphs it appears in, etc.
+    Reads the gSpan output from 'output_file'.
+    We expect lines like:
+      t # <subg_id> * <support_info>
+      ...
+      x: <list_of_graphIDs> or something similar
+    This is version-dependent. We'll parse for patterns:
+      "t # 0 *" => new subgraph with ID=0
+      "x: 3  -> SUPPORT: #graphs: 7" might list the containing graphs
+    We'll store membership in subgraphs[k]['graphs'] = set([...]).
+    The user must adapt this to the actual lines gSpan prints.
     """
-    def __init__(self):
-        self.discovered = []  # list of patterns
-    
-    def receive(self, gs_subgraph):
-        """
-        gs_subgraph is a subgraph object from gSpan, containing info about
-        its structure, frequency, the graphs it appears in, etc.
-        """
-        self.discovered.append(gs_subgraph)
+    subgraphs = []
+    current_subg = None
 
-def mine_frequent_subgraphs(nx_graphs, min_support_ratio=0.1):
-    """
-    Use gSpan to mine subgraphs with a min_support_ratio of the total Nx graphs.
-    Returns a list of discovered subgraphs from gSpan.
-    """
-    # Convert networkx graphs to gSpan format
-    gspan_graphs = convert_nx_list_to_gspan(nx_graphs)
-    n = len(gspan_graphs)
-    min_support_count = max(1, floor(n * min_support_ratio))
-    
-    # Prepare gSpan arguments
-    args = gspan_parser.parse_args(args=[])
-    args.min_support = min_support_count
-    args.verbose = False
-    args.where = True  # so we can see which graphs the pattern appears in
-    
-    # Setup and run
-    gs = gSpan(
-        database=gspan_graphs,
-        args=args,
-        call_back=GSCallback()
-    )
-    gs.run()
-    
-    # The callback is stored in gs.call_back
-    discovered_subs = gs.call_back.discovered  # list of subgraph patterns
-    return discovered_subs
+    with open(output_file, 'r') as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+
+            # Example: line "t # 0 *..."
+            if line.startswith('t #'):
+                # if we were reading a subgraph, store it
+                if current_subg is not None:
+                    subgraphs.append(current_subg)
+
+                # parse the new subg ID
+                parts = line.split('#')
+                subg_id_str = parts[1].strip()
+                # sometimes there's additional info after that
+                # e.g. "0 * freq..."
+                # We'll just store the first token
+                subg_id_str = subg_id_str.split()[0]
+                current_subg = {
+                    'id': subg_id_str,
+                    'graphs': set()
+                }
+
+            # Example: a line that starts with 'x: ' listing graph IDs?
+            # e.g. "x: 0 2 3" to show which graphs the pattern is in
+            elif line.startswith('x:'):
+                # parse graph IDs
+                # line might be: "x: 0 2 5"
+                # or it might have extra text about support
+                # We'll just strip off 'x:' and split the rest
+                content = line[2:].strip()
+                # e.g. "0 2 5"
+                tokens = content.split()
+                # interpret each token as a graph ID
+                # might skip tokens that aren't numeric if the line has more data
+                for tok in tokens:
+                    if tok.isdigit():
+                        current_subg['graphs'].add(int(tok))
+
+    # After file ends, if we have a subgraph in progress
+    if current_subg is not None:
+        subgraphs.append(current_subg)
+
+    return subgraphs
 
 ##############################################################################
-# 4. Discriminative Filtering (Chi-square)
+# 4. Discriminative filtering by chi-square
 ##############################################################################
-def compute_chi2(pattern, labels, n):
+def compute_chi2(subgraphs, labels, ngraphs):
     """
-    pattern: a gSpan Subgraph object that has 'where' info (graph IDs where it appears).
-    labels: array of shape (n,) with 0/1
-    n: total number of graphs
-    Returns: chi-square statistic
+    subgraphs: list of dicts with {'id':..., 'graphs': set([...])}
+    labels: array of shape (ngraphs,)
+    We return subgraphs sorted by descending chi2 score.
     """
-    present_label0 = 0
-    present_label1 = 0
-    absent_label0  = 0
-    absent_label1  = 0
-    
-    # Graph IDs where subgraph is present
-    present_gids = set(pattern.vertex_mappings.keys())  # which graphs contain pattern
-    
-    for gid in range(n):
-        lbl = labels[gid]
-        if gid in present_gids:
-            if lbl == 0:
-                present_label0 += 1
+    scored = []
+    for sg in subgraphs:
+        present_label0 = 0
+        present_label1 = 0
+        absent_label0 = 0
+        absent_label1 = 0
+
+        for i in range(ngraphs):
+            is_present = (i in sg['graphs'])
+            lbl = labels[i]
+            if is_present:
+                if lbl == 0:
+                    present_label0 += 1
+                else:
+                    present_label1 += 1
             else:
-                present_label1 += 1
-        else:
-            if lbl == 0:
-                absent_label0 += 1
-            else:
-                absent_label1 += 1
-    
-    contingency = np.array([
-        [present_label0, present_label1],
-        [absent_label0,  absent_label1]
-    ], dtype=int)
-    chi2, pval, dof, expected = chi2_contingency(contingency)
-    return chi2
+                if lbl == 0:
+                    absent_label0 += 1
+                else:
+                    absent_label1 += 1
 
-def select_top_k_subgraphs(subgraphs, nx_graphs, labels, k=100):
-    """
-    subgraphs: list of discovered gSpan subgraph patterns
-    nx_graphs: the original Nx graphs
-    labels: array of shape (n,) with 0/1
-    k: max number of subgraphs to keep
-    Returns the top k subgraphs sorted by chi2 desc.
-    """
-    n = len(nx_graphs)
-    scored_subs = []
-    for pat in subgraphs:
-        chi2_val = compute_chi2(pat, labels, n)
-        scored_subs.append((pat, chi2_val))
-    
-    scored_subs.sort(key=lambda x: x[1], reverse=True)
-    top_k = [x[0] for x in scored_subs[:k]]
-    return top_k
+        # 2x2 contingency table
+        table = np.array([[present_label0, present_label1],
+                          [absent_label0, absent_label1]], dtype=np.int32)
+        # compute chi2
+        chi2, pval, _, _ = chi2_contingency(table)
+        scored.append((sg, chi2))
+
+    # sort by chi2 descending
+    scored.sort(key=lambda x: x[1], reverse=True)
+    top_subgraphs = [x[0] for x in scored]
+    return top_subgraphs
 
 ##############################################################################
-# 5. Converting Graphs to Binary Features
+# 5. Convert any set of graphs to presence/absence features
 ##############################################################################
-# We must re-check subgraph isomorphism. gSpan subgraph objects contain
-# adjacency + labels. We'll do a naive check with each pattern for each graph.
-
-# However, to save time, we can use the 'where' info from the gSpan subgraph
-# to see which graphs it appeared in. That is presumably the presence set
-# (assuming no false positives). We can rely on that as a quick approach.
-
-def build_presence_matrix(top_subs, n):
+def convert_to_features(graphs, subgraphs):
     """
-    For each subgraph in top_subs, we can see which graphs it appears in
-    from subgraph.vertex_mappings. We'll build an n x len(top_subs) binary matrix.
+    If subgraphs already contain the membership info, we just mark presence=1
+    if the index i is in subgraph['graphs'].
+    Features: shape [n_graphs, n_subgraphs]
     """
-    features = np.zeros((n, len(top_subs)), dtype=np.uint8)
-    for j, pat in enumerate(top_subs):
-        present_gids = set(pat.vertex_mappings.keys())
-        for gid in present_gids:
-            features[gid, j] = 1
+    ngraphs = len(graphs)
+    nsubs = len(subgraphs)
+    features = np.zeros((ngraphs, nsubs), dtype=np.uint8)
+
+    # We assume the graph index used in membership sets is the same as the order
+    # in which we loaded them. That implies that the training/test sets are the
+    # same or consistent with these indices.
+    for j, sg in enumerate(subgraphs):
+        for gidx in sg['graphs']:
+            if 0 <= gidx < ngraphs:
+                features[gidx, j] = 1
+
     return features
 
 ##############################################################################
-# 6. Command-Line Logic
+# 6. Main Entry: Two modes => "identify" or "convert"
 ##############################################################################
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--mode", type=str, required=True, choices=["identify","convert"],
-                        help="Mode: 'identify' to mine & select subgraphs, 'convert' for feature vectors.")
+    parser.add_argument("--mode", choices=["identify", "convert"], required=True,
+                        help="Mode: 'identify' (mine + rank subgraphs) or 'convert' (create features).")
     parser.add_argument("--graphs", type=str, required=True,
-                        help="Path to TUDataset-format graph file.")
+                        help="Path to graphs file in assignment format (#, v, e lines).")
     parser.add_argument("--labels", type=str, default=None,
-                        help="Path to labels file (only needed in identify mode).")
+                        help="Path to labels (only needed in identify mode).")
     parser.add_argument("--out_subs", type=str, default=None,
-                        help="Path to store top subgraphs (only in identify mode).")
+                        help="Path to store subgraphs in identify mode.")
     parser.add_argument("--in_subs", type=str, default=None,
-                        help="Path to read subgraphs (only in convert mode).")
+                        help="Path to read subgraphs in convert mode.")
     parser.add_argument("--out_features", type=str, default=None,
-                        help="Path to store feature matrix .npy (only in convert mode).")
+                        help="Path to store 2D numpy features in convert mode.")
 
-    # Additional arguments for subgraph-mining
-    parser.add_argument("--min_support_ratio", type=float, default=0.1,
-                        help="Minimum support ratio for gSpan.")
-    parser.add_argument("--max_subgraphs", type=int, default=100,
-                        help="Max subgraphs to keep after discriminative filtering.")
+    # Additional arguments for identify
+    parser.add_argument("--binary", type=str, default=None,
+                        help="Path to gSpan binary (only needed in identify mode).")
+    parser.add_argument("--min_support", type=float, default=0.05,
+                        help="Minimum support fraction (0.05 => 5%).")
 
-    # For optional local train/test splitting if we want to test
-    parser.add_argument("--test_split", type=float, default=0.3,
-                        help="Fraction of data for local test. 0 => no local test split.")
     args = parser.parse_args()
 
     if args.mode == "identify":
-        if not args.labels or not args.out_subs:
-            raise ValueError("In identify mode, --labels and --out_subs must be specified.")
-        
-        nx_graphs, labels = load_graphs_tudataset(args.graphs, args.labels)
-        n = len(nx_graphs)
-        print(f"Loaded {n} graphs for subgraph mining. Label shape={labels.shape}")
+        # Check required arguments
+        if not args.labels or not args.out_subs or not args.binary:
+            raise ValueError("In 'identify' mode, must provide --labels, --out_subs, and --binary.")
 
-        # Optional local train/test split for your debugging
-        if args.test_split > 0.0:
-            G_train, G_test, y_train, y_test = train_test_split(nx_graphs, labels,
-                                                               test_size=args.test_split,
-                                                               random_state=42,
-                                                               stratify=labels)
-            print(f"[Local Debug] Train size={len(G_train)}, Test size={len(G_test)}")
-            # We only mine subgraphs on the 'training' portion
-            to_mine_graphs = G_train
-            to_mine_labels = y_train
-        else:
-            to_mine_graphs = nx_graphs
-            to_mine_labels = labels
-        
-        # 1) Mine subgraphs
-        discovered_subs = mine_frequent_subgraphs(to_mine_graphs, args.min_support_ratio)
-        print(f"Discovered {len(discovered_subs)} subgraphs with support >= {args.min_support_ratio}")
-        
-        # 2) Discriminative filtering
-        top_subs = select_top_k_subgraphs(discovered_subs, to_mine_graphs, to_mine_labels,
-                                          k=args.max_subgraphs)
-        print(f"Selected top {len(top_subs)} discriminative subgraphs.")
-        
-        # 3) Save them to file
-        # We'll store them by pickling or a custom text representation. Let's do a
-        # binary pickle for simplicity.
-        import pickle
-        with open(args.out_subs, "wb") as f:
-            pickle.dump(top_subs, f)
-        
-        print(f"Saved top subgraphs to {args.out_subs}.")
-        
-        # [Optional] If you're doing local debug, we can test building the feature matrix
-        if args.test_split > 0.0:
-            # presence matrix on "train" portion
-            train_feats = build_presence_matrix(top_subs, len(G_train))
-            # presence matrix on "test" portion
-            test_feats = build_presence_matrix(top_subs, len(G_test))
-            # Evaluate e.g. a quick ROC using scikit-learn
-            from sklearn.svm import SVC
-            from sklearn.metrics import roc_auc_score
+        # 1) Load training graphs & labels
+        graphs = load_graphs(args.graphs)
+        labels = load_labels(args.labels)
+        ngraphs = len(graphs)
 
-            model = SVC(kernel='rbf', class_weight='balanced', probability=True, random_state=0)
-            model.fit(train_feats, y_train)
-            y_score_train = model.predict_proba(train_feats)[:,1]
-            y_score_test  = model.predict_proba(test_feats)[:,1]
-            auc_train = roc_auc_score(y_train, y_score_train)
-            auc_test  = roc_auc_score(y_test,  y_score_test)
-            print(f"[Local Debug] Train ROC-AUC={auc_train:.3f}, Test ROC-AUC={auc_test:.3f}")
+        # 2) Preprocess or copy the input to a gSpan-compatible file
+        #    We'll assume you have already preprocessed externally, or we do a direct copy:
+        miner_infile = "temp_miner_input.dat"
+        # If your data is already in the correct gSpan format, just do:
+        # cp <args.graphs> -> miner_infile
+        # otherwise, implement a transform function. For example:
+        # For now, let's just do a direct copy:
+        with open(args.graphs, 'r') as fin, open(miner_infile, 'w') as fout:
+            fout.write(fin.read())
+
+        # 3) Run gSpan
+        miner_outfile = "temp_miner_output.txt"
+        run_subgraph_miner_gspan(
+            miner_binary=args.binary,
+            dataset_file=miner_infile,
+            output_file=miner_outfile,
+            min_support=args.min_support
+        )
+
+        # 4) Parse mined subgraphs
+        subgraphs = parse_mined_subgraphs_gspan(miner_outfile, ngraphs)
+
+        # 5) Discriminative filtering via chi2
+        sorted_subs = compute_chi2(subgraphs, labels, ngraphs)
+
+        # 6) Keep top 100
+        top_k = 100 if len(sorted_subs) > 100 else len(sorted_subs)
+        top_subs = sorted_subs[:top_k]
+
+        # 7) Write them to <args.out_subs>
+        with open(args.out_subs, 'w') as f:
+            for sg in top_subs:
+                sg_id = sg['id']
+                membership_list = sorted(list(sg['graphs']))
+                f.write(f"SUBG_ID:{sg_id}\n")
+                f.write(f"MEMBERS:{' '.join(map(str, membership_list))}\n")
+                f.write("----\n")
+
+        print(f"[INFO] Completed identify mode. Wrote {top_k} subgraphs to {args.out_subs}")
 
     elif args.mode == "convert":
+        # Check required arguments
         if not args.in_subs or not args.out_features:
-            raise ValueError("In convert mode, --in_subs and --out_features must be specified.")
-        
-        # 1) Load the subgraphs
-        import pickle
-        with open(args.in_subs, "rb") as f:
-            top_subs = pickle.load(f)
-        print(f"Loaded {len(top_subs)} subgraphs from {args.in_subs}.")
-        
-        # 2) Load the graphs to convert
-        nx_graphs, _ = load_graphs_tudataset(args.graphs, "dummy_labels.txt")
-        # Because we only need the graphs, labels not used in convert mode
-        n = len(nx_graphs)
-        print(f"Loaded {n} graphs for conversion.")
-        
-        # 3) We can rely on the 'where' info from gSpan, but that only works if
-        #    the graph IDs match what we had during mining. This can be tricky
-        #    if there's a mismatch. Alternatively, we do a direct subgraph
-        #    isomorphism check. But let's assume the same order of graphs for now
-        #    is not guaranteed if used by TAs. So let's do naive isomorphism:
+            raise ValueError("In 'convert' mode, must provide --in_subs and --out_features.")
 
-        # HOWEVER, we do not have the original "vertex_mappings" for these new graphs
-        # in the subgraphs. If the TAs reorder graphs, the "where" sets won't match.
-        # => We do a real subgraph isomorphism approach (costly).
-        # => For demonstration, let's rely on the presence matrix approach if we assume
-        #    the TAs will pass the same graphs in the same order. 
-        # 
-        # If not, we must do a subgraph isomorphism check. We'll do a minimal version here.
+        # 1) Load the graphs
+        graphs = load_graphs(args.graphs)
+        ngraphs = len(graphs)
 
-        # Let's do a direct presence check for each subgraph in each new graph.
-        # This can be extremely slow for large datasets, so be careful!
+        # 2) Load subgraphs from <args.in_subs>
+        subgraphs = []
+        with open(args.in_subs, 'r') as fin:
+            lines = fin.read().strip().split('\n')
 
-        # For demonstration, we do a naive approach that always returns 0
-        # (since implementing a robust multi-edge subgraph isomorphism is non-trivial).
-        # In practice, you'd implement or use a library for subgraph isomorphism.
+        idx = 0
+        while idx < len(lines):
+            line = lines[idx].strip()
+            if line.startswith("SUBG_ID:"):
+                sg_id = line.split(":", 1)[1].strip()
+                idx += 1
+                # next line: "MEMBERS: ..."
+                mem_line = lines[idx].strip()
+                membership_str = mem_line.split(":", 1)[1].strip()
+                membership_ids = set(map(int, membership_str.split()))
+                subgraphs.append({
+                    'id': sg_id,
+                    'graphs': membership_ids
+                })
+                idx += 1  # skip "----" line
+            else:
+                idx += 1
 
-        # We'll do the final presence matrix anyway:
-        features = np.zeros((n, len(top_subs)), dtype=np.uint8)
-        print("Warning: Subgraph isomorphism not fully implemented. Returning 0 matrix.")
-        # Potentially do: features[i, j] = 1 if subgraph_j is in graph_i
+        # 3) Convert to features
+        features = convert_to_features(graphs, subgraphs)
+        print(f"[INFO] Feature matrix shape = {features.shape}")
 
-        # 4) Save to .npy
+        # 4) Save as numpy
         np.save(args.out_features, features)
-        print(f"Features saved to {args.out_features}. Shape={features.shape}")
+        print(f"[INFO] Saved features to {args.out_features}")
 
     else:
         raise ValueError(f"Unknown mode: {args.mode}")
-
-if __name__ == "__main__":
-    main()

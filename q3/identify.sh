@@ -1,34 +1,35 @@
 #!/usr/bin/env bash
 # identify.sh
 # Usage:
-#   bash identify.sh <path_train_graphs> <path_train_labels> <path_discriminative_subgraphs> <path_miner_binary> <min_support>
+#   bash identify.sh <path_train_graphs_gspan> <path_train_labels> <path_gspan_binary> <min_support>
 #
-# e.g.:
-#   bash identify.sh /data/train_graphs_gspan.dat /data/train_labels.txt /output/subs.txt /binaries/gspan 0.05
+# Example:
+#   bash identify.sh /data/train_graphs.dat /data/train_labels.txt /binaries/gspan 0.05
 #
-# <path_train_graphs>          = absolute filepath to the gSpan-compatible input file
-# <path_train_labels>          = absolute filepath to the labels of training graphs
-# <path_discriminative_subs>   = absolute filepath where the final subgraphs will be stored
-# <path_miner_binary>          = absolute filepath to your gSpan executable
-# <min_support>                = e.g. 0.05 for 5% minimum support
+# Explanation of parameters:
+#   <path_train_graphs_gspan>  = Path to a gSpan-compatible input file (e.g. "mydata.dat")
+#   <path_train_labels>        = Path to the labels of the training graphs (one label per line)
+#   <path_gspan_binary>        = Path to the gSpan executable
+#   <min_support>              = e.g., 0.05 => 5% minimum support
 
-if [ "$#" -ne 5 ]; then
-  echo "Usage: bash identify.sh <path_train_graphs> <path_train_labels> <path_discriminative_subgraphs> <path_miner_binary> <min_support>"
+if [ "$#" -ne 4 ]; then
+  echo "Usage: bash identify.sh <path_train_graphs_gspan> <path_train_labels> <path_gspan_binary> <min_support>"
   exit 1
 fi
 
 PATH_TRAIN_GRAPHS=$1
 PATH_TRAIN_LABELS=$2
-PATH_DISCRIM_SUBS=$3
-PATH_MINER_BINARY=$4
-MIN_SUPPORT=$5  # e.g., 0.05 => 5%
+PATH_GSPAN_BINARY=$3
+MIN_SUPPORT=$4    # e.g. 0.05 => 5%
 
+# Call subgraph_mining.py in identify mode,
+# without any explicit "out_subs" argument since gSpan
+# will automatically produce <path_train_graphs_gspan>.fp.
 python3 subgraph_mining.py \
   --mode identify \
   --graphs "$PATH_TRAIN_GRAPHS" \
   --labels "$PATH_TRAIN_LABELS" \
-  --out_subs "$PATH_DISCRIM_SUBS" \
-  --binary "$PATH_MINER_BINARY" \
+  --binary "$PATH_GSPAN_BINARY" \
   --min_support "$MIN_SUPPORT"
 
-echo "Identification of discriminative subgraphs complete. Saved to $PATH_DISCRIM_SUBS."
+echo "Identification of discriminative subgraphs complete."

@@ -1,4 +1,5 @@
 # Ignore output directories
+.gitignore
 output2/
 output1/
 Binaries/

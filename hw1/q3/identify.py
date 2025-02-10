@@ -371,7 +371,7 @@ Gs = load_graphs_gspan_format(preprocessed_graph_path)
 labels = load_labels(args.labels)
 
 
-GSPAN_BINARY_PATH = '../Binaries/gspan'
+GSPAN_BINARY_PATH = './gspan'
 MIN_SUPPORT = 0.003
 frequent_subgraphs_path = run_gspan(GSPAN_BINARY_PATH, preprocessed_graph_path, MIN_SUPPORT)
 frequent_subgraphs = parse_fp_file(frequent_subgraphs_path)

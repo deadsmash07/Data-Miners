@@ -1,9 +1,48 @@
 # HW3: Readme
-
-## Repo Structure
-
-```
-# (Add your repo structure here if needed)
+```plaintext
+.
+└── hw3
+    ├── eval_task1_d1.py
+    ├── hw3_col761_2025_datasets
+    │   └── datasets
+    │       ├── task1
+    │       │   ├── d1
+    │       │   │   ├── edges.npy
+    │       │   │   ├── label.npy
+    │       │   │   └── node_feat.npy
+    │       │   ├── d2
+    │       │   │   ├── edges.npy
+    │       │   │   ├── label.npy
+    │       │   │   └── node_feat.npy
+    │       │   ├── Makefile
+    │       │   ├── README.md
+    │       │   └── test_shapes.py
+    │       └── task2
+    │           ├── Makefile
+    │           ├── README.md
+    │           ├── test_shapes.py
+    │           └── train
+    │               ├── label.npy
+    │               ├── product_features.npy
+    │               ├── user_features.npy
+    │               └── user_product.npy
+    ├── hw3.pdf
+    ├── model1_d1.pt
+    ├── preds1_d1.csv
+    ├── prepare_Data.py
+    ├── readme.md
+    ├── src
+    │   ├── model1.py
+    │   ├── model2.py
+    │   ├── test1.py
+    │   ├── test2.py
+    │   ├── train1.py
+    │   └── train2.py
+    ├── test1.sh
+    ├── test2.sh
+    ├── train1_d1.pt
+    ├── train1.sh
+    └── train2.sh
 ```
 
 ## Environment Setup
@@ -53,7 +92,7 @@ python3 scripts/prepare_task2.py \
 
 ---
 
-## 🚂 Training
+## Training
 
 ### Task 1
 

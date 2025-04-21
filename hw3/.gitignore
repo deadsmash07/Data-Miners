@@ -1,3 +1,7 @@
 datasets/
 *.csv
 *.pt
+__pycache__/
+*.pyc
+src/__pycache__/
+.DS_Store

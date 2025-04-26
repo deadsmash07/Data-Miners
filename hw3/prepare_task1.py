@@ -58,5 +58,8 @@ def main():
     print(f"Saved train data to {args.train_output}")
     print(f"Train nodes: {train_mask.sum().item()}, Test nodes: {test_mask.sum().item()}")
 
+    torch.save(train_data, args.test_output)
+    print(f"Saved test data to {args.test_output}")
 if __name__=='__main__':
     main()
+

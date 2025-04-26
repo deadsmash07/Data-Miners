@@ -2,9 +2,14 @@ import argparse
 import torch
 import torch.nn.functional as F
 from model2 import BipartiteGNN
-
+from tqdm import tqdm
 def main(args):
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    if torch.cuda.is_available():
+        device = torch.device('cuda')
+        print(f"Using GPU: {torch.cuda.get_device_name(0)}")
+    else:
+        device = torch.device('cpu')
+        print("GPU not available, using CPU")
     data = torch.load(args.input, map_location=device)
     # x_u, x_p = data.x_u.to(device), data.x_p.to(device)
     # edge_index    = data.edge_index.to(device)
@@ -43,12 +48,15 @@ def main(args):
     criterion = torch.nn.BCEWithLogitsLoss()
 
     model.train()
-    for epoch in range(1, 1001):
+    pbar = tqdm(range(1, 1001), desc='Training', unit='epoch')
+    for epoch in pbar:
         optimizer.zero_grad()
         out = model(x_u, x_p, edge_index)
         loss = criterion(out[train_mask], y_train)
         loss.backward()
         optimizer.step()
+        pbar.set_postfix({'loss': f'{loss.item():.4f}'})
+
         if epoch % 20 == 0:
             print(f'Epoch {epoch:03d}, Loss: {loss.item():.4f}')
 

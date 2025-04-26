@@ -3,10 +3,22 @@ import torch
 import torch.nn.functional as F
 from torch_geometric.data import Data
 from model1 import GCN1
+from tqdm import tqdm
+import numpy as np
 
 def main(args):
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    data = torch.load(args.input, map_location=device)
+    
+    # Set device with explicit CUDA visibility
+    if torch.cuda.is_available():
+        device = torch.device('cuda')
+        print(f"Using GPU: {torch.cuda.get_device_name(0)}")
+    else:
+        device = torch.device('cpu')
+        print("GPU not available, using CPU")
+    
+    # Load data to CPU first
+    print(f"Loading data from {args.input}...")
+    data = torch.load(args.input, map_location='cpu')
     x, edge_index, y = data.x, data.edge_index, data.y
     train_mask = data.train_mask
 
@@ -25,7 +37,8 @@ def main(args):
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=10, verbose=True)
 
     model.train()
-    for epoch in range(1, 1001):
+    pbar = tqdm(range(1, 1001), desc='Training', unit='epoch')
+    for epoch in pbar:
         optimizer.zero_grad()
         out = model(x, edge_index)
         
@@ -35,9 +48,10 @@ def main(args):
         train_loss.backward()
         optimizer.step()
         scheduler.step(train_loss)
+        pbar.set_postfix({'loss': f'{train_loss.item():.4f}'})
 
         if epoch % 50 == 0:
-            print(f'Epoch {epoch:03d}, Train Loss: {train_loss.item():.4f}')
+            print(f'Epoch {epoch:03d}, Train Loss: {train_loss.item():.4f}')      
 
     # save
     torch.save(model.state_dict(), args.output)

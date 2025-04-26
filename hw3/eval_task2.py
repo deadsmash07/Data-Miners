@@ -2,10 +2,15 @@ import numpy as np
 from sklearn.metrics import f1_score
 import pandas as pd
 import argparse
+import torch
 
 def calculate_weighted_f1(true_labels_path, predicted_labels_path):
-    # Read the true labels from .npy file and predicted labels from CSV
-    true_labels = np.load(true_labels_path)
+    # Load true labels (support .npy and .pt) and predicted labels from CSV
+    if true_labels_path.endswith('.pt'):
+        data = torch.load(true_labels_path, map_location='cpu')
+        true_labels = data['labels'].cpu().numpy()
+    else:
+        true_labels = np.load(true_labels_path)
     predicted_labels = pd.read_csv(predicted_labels_path, header=None).values
     
     # Flatten both arrays for F1 score computation
@@ -25,9 +30,9 @@ def calculate_weighted_f1(true_labels_path, predicted_labels_path):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Calculate weighted F1 score')
+    parser.add_argument('--true', required=True, help='Path to true labels file (.npy or .pt)')
     parser.add_argument('--pred', required=True, help='Path to predicted labels CSV file')
     args = parser.parse_args()
-    true_labels_path='datasets/task2/train/label.npy'
-    calculate_weighted_f1(true_labels_path, args.pred) 
+    calculate_weighted_f1(args.true, args.pred)
 
 # python eval_task2.py --true path/to/true_labels.npy --pred path/to/predicted_labels.csv

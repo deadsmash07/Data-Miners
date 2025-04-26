@@ -2,7 +2,7 @@ import argparse
 import torch
 import torch.nn.functional as F
 from model2 import BipartiteGNN
-from tqdm import tqdm
+
 def main(args):
     if torch.cuda.is_available():
         device = torch.device('cuda')
@@ -48,14 +48,12 @@ def main(args):
     criterion = torch.nn.BCEWithLogitsLoss()
 
     model.train()
-    pbar = tqdm(range(1, 1001), desc='Training', unit='epoch')
-    for epoch in pbar:
+    for epoch in range(1, 1001):
         optimizer.zero_grad()
         out = model(x_u, x_p, edge_index)
         loss = criterion(out[train_mask], y_train)
         loss.backward()
         optimizer.step()
-        pbar.set_postfix({'loss': f'{loss.item():.4f}'})
 
         if epoch % 20 == 0:
             print(f'Epoch {epoch:03d}, Loss: {loss.item():.4f}')

@@ -3,7 +3,6 @@ import torch
 import torch.nn.functional as F
 from torch_geometric.data import Data
 from model1 import GCN1
-from tqdm import tqdm
 import numpy as np
 
 def main(args):
@@ -37,8 +36,7 @@ def main(args):
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=10, verbose=True)
 
     model.train()
-    pbar = tqdm(range(1, 1001), desc='Training', unit='epoch')
-    for epoch in pbar:
+    for epoch in range(1, 1001):
         optimizer.zero_grad()
         out = model(x, edge_index)
         
@@ -48,7 +46,6 @@ def main(args):
         train_loss.backward()
         optimizer.step()
         scheduler.step(train_loss)
-        pbar.set_postfix({'loss': f'{train_loss.item():.4f}'})
 
         if epoch % 50 == 0:
             print(f'Epoch {epoch:03d}, Train Loss: {train_loss.item():.4f}')      

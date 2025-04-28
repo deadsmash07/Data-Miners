@@ -1,7 +1,7 @@
 import argparse
 import torch
 import pandas as pd
-from model1 import GCN1
+from model1_d2 import GCN1
 
 def main(args):
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')

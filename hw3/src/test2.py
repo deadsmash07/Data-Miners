@@ -28,9 +28,10 @@ def main(args):
     with torch.no_grad():
         logits = model(x_u, x_p, edge_index)
         probs  = torch.sigmoid(logits).cpu().numpy()
+        preds = (probs >= 0.5).astype(int)
 
     # save (mt × ℓ)
-    pd.DataFrame(probs).to_csv(args.output, header=False, index=False)
+    pd.DataFrame(preds).to_csv(args.output, header=False, index=False)
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()

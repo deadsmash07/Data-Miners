@@ -55,7 +55,7 @@ def main(args):
         loss.backward()
         optimizer.step()
 
-        if epoch % 20 == 0:
+        if epoch % 50 == 0:
             print(f'Epoch {epoch:03d}, Loss: {loss.item():.4f}')
 
     torch.save(model.state_dict(), args.output)

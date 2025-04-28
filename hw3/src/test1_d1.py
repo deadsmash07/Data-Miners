@@ -1,7 +1,7 @@
 import argparse
 import torch
 import pandas as pd
-from model1 import GCN1
+from model1_d1 import ImprovedGNN
 
 def main(args):
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -18,7 +18,13 @@ def main(args):
         # or infer it from another source like the model checkpoint
         num_classes = 2  # Default value, adjust based on your dataset
 
-    model = GCN1(in_feats=x.size(1), hidden_feats=64, num_classes=num_classes).to(device)
+    model = ImprovedGNN(
+        in_feats=x.size(1), 
+        hidden_feats=128, 
+        num_classes=num_classes,
+        dropout=0.3,
+        num_layers=4
+    ).to(device)
     model.load_state_dict(torch.load(args.model, map_location=device))
     model.eval()
 

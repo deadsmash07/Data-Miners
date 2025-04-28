@@ -8,7 +8,7 @@ OUTPUT_PATH="$3"
 TEMP_TEST_PT="temp_test_d1.pt"
 
 # Create test .pt file from the dataset
-python prepare_task1.py \
+python src/prepare_task1.py \
     --edges "${DATASET_DIR}/edges.npy" \
     --features "${DATASET_DIR}/node_feat.npy" \
     --labels "${DATASET_DIR}/label.npy" \

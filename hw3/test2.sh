@@ -7,7 +7,7 @@ DATASET_DIR="$1"
 MODEL_PATH="$2"
 OUTPUT_PATH="$3"
 
-python prepare_task2.py \
+python src/prepare_task2.py \
     --data_dir "${DATASET_DIR}" \
     --output "$TEMP_TEST_PT" \
 

@@ -7,7 +7,7 @@ DATASET_DIR="$1"
 OUTPUT_PATH="$2"
 
 # Create .pt files from the dataset
-python prepare_task2.py \
+python src/prepare_task2.py \
     --data_dir "${DATASET_DIR}" \
     --output "$TEMP_TRAIN_PT" \
 
